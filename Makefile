@@ -1,7 +1,7 @@
 .PHONY: all clean
 
-CFLAGS = -O3 -g -Wall -Wextra -pedantic -std=c99
-LDFLAGS = -fopenmp
+CFLAGS += -O3 -g -Wall -Wextra -pedantic -std=c99 -D_GNU_SOURCE
+LDFLAGS += -fopenmp
 
 all: main hash_research
 

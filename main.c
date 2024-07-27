@@ -378,19 +378,37 @@ multi_core_run (Arena *a, char *data, size_t data_len)
 }
 
 int
-main ()
+main (int argc, char **argv)
 {
-  int fd = open ("./measurements.txt", O_RDONLY);
-  assert (fd != -1);
+  char *measurements_filename = argc == 2 ? argv[1] : "./measurements-1k.txt";
+  int fd = open (measurements_filename, O_RDONLY);
+  if (fd == -1)
+    {
+      perror ("open");
+      return EXIT_FAILURE;
+    }
 
   struct stat sb = { 0 };
   int ok = fstat (fd, &sb);
-  assert (ok != -1);
+  if (ok == -1)
+    {
+      perror ("fstat");
+      return EXIT_FAILURE;
+    }
 
   char *data
       = mmap (NULL, sb.st_size, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, fd, 0);
-
-  assert (data != MAP_FAILED);
+  if (data == MAP_FAILED)
+    {
+      perror ("mmap");
+      return EXIT_FAILURE;
+    }
+  ok = madvise (data, sb.st_size, MADV_WILLNEED | MADV_RANDOM | MADV_HUGEPAGE);
+  if (ok == -1)
+    {
+      perror ("madvise");
+      return EXIT_FAILURE;
+    }
 
   Arena *a = arena_new ();
   // single_core_run (a, data, sb.st_size);
