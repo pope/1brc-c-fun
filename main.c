@@ -167,58 +167,20 @@ statstable_get (StatsTable *table, char *key, size_t key_len)
   return NULL;
 }
 
-size_t
-statstable__sort_partition (StatsTable *table, size_t low, size_t high)
+static int
+stats__cmp (const void *aa, const void *bb)
 {
-  assert (table);
-  assert (low < high);
+  const Stats *a = *(Stats **)aa;
+  const Stats *b = *(Stats **)bb;
 
-  Stats *tmp = NULL;
-  Stats *pivot = table->stats[high];
-  size_t i = low;
+  if (a == NULL && b == NULL)
+    return 0;
+  if (b == NULL)
+    return -1;
+  if (a == NULL)
+    return 1;
 
-  if (pivot == NULL)
-    {
-      for (size_t j = low; j < high; j++)
-        {
-          tmp = table->stats[i];
-          table->stats[i] = table->stats[j];
-          table->stats[j] = tmp;
-          i++;
-        }
-    }
-  else
-    {
-      for (size_t j = low; j < high; j++)
-        {
-          Stats *stats = table->stats[j];
-          if (stats != NULL && strcmp (stats->key, pivot->key) <= 0)
-            {
-              tmp = table->stats[i];
-              table->stats[i] = table->stats[j];
-              table->stats[j] = tmp;
-              i++;
-            }
-        }
-    }
-
-  tmp = table->stats[i];
-  table->stats[i] = table->stats[high];
-  table->stats[high] = tmp;
-  return i;
-}
-
-void
-statstable_sort (StatsTable *table, size_t low, size_t high)
-{
-  assert (table);
-
-  while (low < high)
-    {
-      size_t p = statstable__sort_partition (table, low, high);
-      statstable_sort (table, low, p - 1);
-      low = p + 1;
-    }
+  return strcmp (a->key, b->key);
 }
 
 void
@@ -284,7 +246,7 @@ process (StatsTable *table, char *data, size_t data_len)
     }
 }
 
-inline void
+static inline void
 statstable__print_stats (Stats *stats)
 {
   int avg = stats->sum / stats->count;
@@ -320,7 +282,7 @@ single_core_run (Arena *a, char *data, size_t data_len)
   table->a = a;
 
   process (table, data, data_len);
-  statstable_sort (table, 0, TABLE_STATS_CAP - 1);
+  qsort (table->stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
   statstable_print (table);
 }
 
@@ -374,7 +336,7 @@ multi_core_run (Arena *a, char *data, size_t data_len)
         }
     }
 
-  statstable_sort (&solution, 0, TABLE_STATS_CAP - 1);
+  qsort (solution.stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
   statstable_print (&solution);
 }
 
