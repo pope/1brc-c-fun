@@ -227,19 +227,19 @@ process (StatsTable *table, char *data, size_t data_len)
                 // than enough.
 
   size_t s = 0;
-  while (s < data_len && *(data + s) != 0)
+  while (s < data_len && data[s] != 0)
     {
       // Get the key, reusing the key buffer
       {
         size_t e = s;
-        while (*(data + e) != ';')
+        while (data[e] != ';')
           e++;
 
         size_t len = e - s;
         assert (len < 64);
 
         strncpy (key, data + s, len);
-        key[len] = '\0';
+        key[len] = 0;
 
         s = e + 1;
       }
@@ -247,29 +247,29 @@ process (StatsTable *table, char *data, size_t data_len)
       int temp = 0;
       {
         int sign = 1;
-        if (*(data + s) == '-')
+        if (data[s] == '-')
           {
             sign = -1;
             s++;
           }
 
-        assert (isdigit (*(data + s)));
+        assert (isdigit (data[s]));
 
-        if (*(data + s + 1) == '.')
+        if (data[s + 1] == '.')
           {
-            temp = ((*(data + s) - '0') * 10) + (*(data + s + 2) - '0');
+            temp = ((data[s] - '0') * 10) + (data[s + 2] - '0');
             s += 3; // Advance to newline
           }
         else
           {
-            temp = ((*(data + s) - '0') * 100) + ((*(data + s + 1) - '0') * 10)
-                   + (*(data + s + 3) - '0');
+            temp = ((data[s] - '0') * 100) + ((data[s + 1] - '0') * 10)
+                   + (data[s + 3] - '0');
             s += 4; // Advance to newline
           }
         temp *= sign;
       }
 
-      assert (*(data + s) == '\n');
+      assert (data[s] == '\n');
       s++;
 
       Stats *stats = statstable_get (table, key, strlen (key));
@@ -336,17 +336,17 @@ multi_core_run (Arena *a, char *data, size_t data_len)
   for (int i = 0; i < batches; i++)
     {
       size_t s = i * (data_len / batches);
-      if (!(s == 0 || *(data + s - 1) == '\n'))
+      if (!(s == 0 || data[s - 1] == '\n'))
         {
-          while (*(data + s) != '\n')
+          while (data[s] != '\n')
             s++;
           s++; // consume the newline
         }
 
       size_t e = MIN ((i + 1) * (data_len / batches), data_len);
-      if (!(e == data_len || *(data + e) == '\n'))
+      if (!(e == data_len || data[e] == '\n'))
         {
-          while (*(data + e) != '\n')
+          while (data[e] != '\n')
             e++;
         }
 
