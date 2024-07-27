@@ -280,8 +280,8 @@ inline void
 statstable__print_stats (Stats *stats)
 {
   int avg = stats->sum / stats->count;
-  printf ("%s=%d.%d/%d.%d/%d.%d", stats->key, stats->min / 10, stats->min % 10,
-          avg / 10, avg % 10, stats->max / 10, stats->max % 10);
+  printf ("%s=%.1f/%.1f/%.1f", stats->key, stats->min / 10.0, avg / 10.0,
+          stats->max / 10.0);
 }
 
 void
@@ -369,7 +369,7 @@ multi_core_run (Arena *a, char *data, size_t data_len)
           update->sum += stats->sum;
           update->count += stats->count;
           update->max = MAX (update->max, stats->max);
-          update->min = MAX (update->min, stats->min);
+          update->min = MIN (update->min, stats->min);
         }
     }
 
