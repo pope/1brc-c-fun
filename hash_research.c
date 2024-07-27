@@ -40,7 +40,7 @@ simple_hash_string (char *str)
 }
 
 int
-main ()
+main (void)
 {
   char *data;
   {

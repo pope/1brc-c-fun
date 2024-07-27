@@ -31,11 +31,12 @@
         default = with pkgs; mkShell {
           packages = [
             clang-tools
-            gdb
             hyperfine
             lldb
             llvmPackages_12.openmp
             treefmtEval.${system}.config.build.wrapper
+          ] ++ lib.optionals stdenv.isLinux [
+            gdb
           ];
         };
       });

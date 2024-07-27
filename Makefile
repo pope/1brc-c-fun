@@ -9,4 +9,4 @@ main: main.c
 hash_research: hash_research.c
 
 clean:
-	-rm main hash_research
+	-rm -rf main hash_research *.dSYM

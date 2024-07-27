@@ -33,7 +33,7 @@ typedef struct arena
 } Arena;
 
 struct arena *
-arena_new ()
+arena_new (void)
 {
   long cap = sysconf (_SC_PAGE_SIZE);
   if (cap == -1)
@@ -407,7 +407,7 @@ main (int argc, char **argv)
       perror ("mmap");
       return EXIT_FAILURE;
     }
-  ok = madvise (data, sb.st_size, MADV_WILLNEED | MADV_RANDOM | MADV_HUGEPAGE);
+  ok = madvise (data, sb.st_size, MADV_WILLNEED | MADV_RANDOM);
   if (ok == -1)
     {
       perror ("madvise");

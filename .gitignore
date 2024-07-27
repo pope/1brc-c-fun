@@ -2,3 +2,4 @@
 main
 hash_research
 measurements.txt
+*.dSYM
