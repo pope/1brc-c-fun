@@ -407,12 +407,14 @@ main (int argc, char **argv)
       perror ("mmap");
       return EXIT_FAILURE;
     }
+#ifdef _DEFAULT_SOURCE
   ok = madvise (data, sb.st_size, MADV_WILLNEED | MADV_RANDOM);
   if (ok == -1)
     {
       perror ("madvise");
       return EXIT_FAILURE;
     }
+#endif
 
   Arena *a = arena_new ();
   // single_core_run (a, data, sb.st_size);

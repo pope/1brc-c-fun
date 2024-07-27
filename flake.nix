@@ -38,6 +38,7 @@
           ] ++ lib.optionals stdenv.isLinux [
             gdb
           ];
+          CFLAGS = "-D_DEFAULT_SOURCE";
         };
       });
     };
