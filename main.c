@@ -123,7 +123,7 @@ typedef struct stats
 typedef struct stablstable
 {
   Arena *a;
-  Stats **stats;
+  Stats *stats[TABLE_STATS_CAP];
 } StatsTable;
 
 Stats *
@@ -314,9 +314,6 @@ single_core_run (Arena *a, char *data, size_t data_len)
   StatsTable *table = arena_alloc (a, sizeof (StatsTable));
   assert (table);
   table->a = a;
-  size_t stats_size = sizeof (Stats) * TABLE_STATS_CAP;
-  table->stats = arena_alloc (a, stats_size);
-  memset (table->stats, 0, stats_size);
 
   process (table, data, data_len);
   statstable_sort (table, 0, TABLE_STATS_CAP - 1);
@@ -351,10 +348,6 @@ multi_core_run (Arena *a, char *data, size_t data_len)
         }
 
       batch_res[i].a = arena_new ();
-      size_t stats_size = sizeof (Stats) * TABLE_STATS_CAP;
-      batch_res[i].stats = arena_alloc (batch_res[i].a, stats_size);
-      memset (batch_res[i].stats, 0, stats_size);
-
       process (&batch_res[i], &data[s], e - s);
     }
 
