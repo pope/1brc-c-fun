@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,7 +142,10 @@ statstable_get (StatsTable *table, char *key, size_t key_len)
         {
           size_t size = sizeof (Stats) + sizeof (char) * (key_len + 1);
           Stats *stat = arena_alloc (table->a, size);
-          memset (stat, 0, size);
+          stat->max = INT_MIN;
+          stat->min = INT_MAX;
+          stat->sum = 0;
+          stat->count = 0;
           stat->key_len = key_len;
           strncpy (stat->key, key, key_len);
           table->stats[idx] = stat;
