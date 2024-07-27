@@ -12,9 +12,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-// There are <42k weather stations. Using 2^16 to give room to find openings
-// and the power of 2 allows for a bit-AND instead of modulo.
-#define TABLE_STATS_CAP 65536UL
+// Defines for some of the rules of 1brc
+#define MAX_STATIONS 10000
+#define MAX_STATION_NAME_LENGTH 100
+
+// There are at most 10k weather stations per the fules. Using 2^14 to give
+// room to find openings and the power of 2 allows for a bit-AND instead of
+// modulo.
+#define TABLE_STATS_CAP (1UL << 14)
 
 ////
 // Arena code modified from
@@ -223,8 +228,7 @@ process (StatsTable *table, char *data, size_t data_len)
   assert (data);
   assert (data_len > 0);
 
-  char key[64]; // Max city name lenght is 29 characters. So 64 should be more
-                // than enough.
+  char key[MAX_STATION_NAME_LENGTH];
 
   size_t s = 0;
   while (s < data_len && data[s] != 0)
@@ -236,7 +240,7 @@ process (StatsTable *table, char *data, size_t data_len)
           e++;
 
         size_t len = e - s;
-        assert (len < 64);
+        assert (len < MAX_STATION_NAME_LENGTH);
 
         strncpy (key, data + s, len);
         key[len] = 0;
