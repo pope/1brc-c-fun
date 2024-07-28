@@ -253,9 +253,9 @@ process (char *data, size_t data_len)
 static inline void
 statstable__print_stats (Stats *stats)
 {
-  int avg = stats->sum / stats->count;
-  printf ("%s=%.1f/%.1f/%.1f", stats->key, stats->min / 10.0, avg / 10.0,
-          stats->max / 10.0);
+  float avg = (float)stats->sum / (float)stats->count;
+  printf ("%s=%.1f/%.1f/%.1f", stats->key, (float)stats->min / 10.0,
+          avg / 10.0, (float)stats->max / 10.0);
 }
 
 void
