@@ -138,33 +138,32 @@ statstable_get (StatsTable *table, char *key, size_t key_len)
   assert (key != NULL);
   assert (key_len > 0);
 
-  for (size_t idx = simple_hash_string (key) & (TABLE_STATS_CAP - 1);
-       idx < TABLE_STATS_CAP; idx++)
+  size_t h = simple_hash_string (key);
+  size_t idx = h & (TABLE_STATS_CAP - 1);
+  Stats *found = table->stats[h & idx];
+  while (found != NULL && found->key_len != key_len
+         && strncmp (found->key, key, key_len) != 0)
     {
-      Stats *found = table->stats[idx];
-
-      if (found == NULL)
-        {
-          size_t size = sizeof (Stats) + sizeof (char) * (key_len + 1);
-          Stats *stat = arena_alloc (table->a, size);
-          stat->max = INT_MIN;
-          stat->min = INT_MAX;
-          stat->sum = 0;
-          stat->count = 0;
-          stat->key_len = key_len;
-          strncpy (stat->key, key, key_len);
-          table->stats[idx] = stat;
-          return stat;
-        }
-
-      if (found->key_len == key_len && strncmp (found->key, key, key_len) == 0)
-        {
-          return found;
-        }
+      h += 1;
+      idx = h & (TABLE_STATS_CAP - 1);
+      found = table->stats[idx];
     }
 
-  assert (NULL); // There should have been enough space
-  return NULL;
+  if (found == NULL)
+    {
+      size_t size = sizeof (Stats) + sizeof (char) * (key_len + 1);
+      Stats *stat = arena_alloc (table->a, size);
+      stat->max = INT_MIN;
+      stat->min = INT_MAX;
+      stat->sum = 0;
+      stat->count = 0;
+      stat->key_len = key_len;
+      strncpy (stat->key, key, key_len);
+      table->stats[idx] = stat;
+      return stat;
+    }
+
+  return found;
 }
 
 static int
