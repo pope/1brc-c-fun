@@ -1,5 +1,6 @@
-.direnv/
-main
-hash_research
-measurements.txt
 *.dSYM
+.direnv/
+gmon.out
+hash_research
+main
+measurements.txt
