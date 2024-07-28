@@ -229,19 +229,19 @@ process (char *data, size_t data_len)
 
         if (data[s + 1] == '.')
           {
-            temp = ((data[s] - '0') * 10) + (data[s + 2] - '0');
+            temp = ((data[s] * 10) + data[s + 2] - ('0' * 11)) * sign;
             s += 4; // Advance past newline
           }
         else
           {
-            temp = ((data[s] - '0') * 100) + ((data[s + 1] - '0') * 10)
-                   + (data[s + 3] - '0');
+            temp = ((data[s] * 100) + (data[s + 1] * 10) + data[s + 3]
+                    - ('0' * 111))
+                   * sign;
             s += 5; // Advance past newline
           }
-        temp *= sign;
       }
 
-      assert (data[s-1] == '\n');
+      assert (data[s - 1] == '\n');
 
       Stats *stats = statstable_get (table, key, key_len, hash);
       stats->count++;
