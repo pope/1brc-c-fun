@@ -182,12 +182,15 @@ stats__cmp (const void *aa, const void *bb)
   return strcmp (a->key, b->key);
 }
 
-void
-process (StatsTable *table, char *data, size_t data_len)
+StatsTable *
+process (char *data, size_t data_len)
 {
-  assert (table);
   assert (data);
   assert (data_len > 0);
+
+  Arena *a = arena_new ();
+  StatsTable *table = arena_alloc (a, sizeof (StatsTable));
+  table->a = a;
 
   char key[MAX_STATION_NAME_LENGTH];
 
@@ -243,6 +246,8 @@ process (StatsTable *table, char *data, size_t data_len)
       stats->max = MAX (stats->max, temp);
       stats->min = MIN (stats->min, temp);
     }
+
+  return table;
 }
 
 static inline void
@@ -274,13 +279,9 @@ statstable_print (StatsTable *table)
 }
 
 void
-single_core_run (Arena *a, char *data, size_t data_len)
+single_core_run (char *data, size_t data_len)
 {
-  StatsTable *table = arena_alloc (a, sizeof (StatsTable));
-  assert (table);
-  table->a = a;
-
-  process (table, data, data_len);
+  StatsTable *table = process (data, data_len);
   qsort (table->stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
   statstable_print (table);
 }
@@ -291,8 +292,7 @@ multi_core_run (Arena *a, char *data, size_t data_len)
   int batches = omp_get_max_threads ();
   assert (batches > 0);
 
-  StatsTable *batch_res = arena_alloc (a, sizeof (StatsTable) * batches);
-  memset (batch_res, 0, sizeof (StatsTable) * batches);
+  StatsTable **batch_res = arena_alloc (a, sizeof (StatsTable *) * batches);
 
 #pragma omp parallel for
   for (int i = 0; i < batches; i++)
@@ -312,22 +312,21 @@ multi_core_run (Arena *a, char *data, size_t data_len)
             e++;
         }
 
-      batch_res[i].a = arena_new ();
-      process (&batch_res[i], &data[s], e - s);
+      batch_res[i] = process (&data[s], e - s);
     }
 
-  StatsTable solution = batch_res[0];
+  StatsTable *solution = batch_res[0];
   for (int i = 1; i < batches; i++)
     {
-      StatsTable table = batch_res[i];
+      StatsTable *table = batch_res[i];
       for (size_t j = 0; j < TABLE_STATS_CAP; j++)
         {
-          Stats *stats = table.stats[j];
+          Stats *stats = table->stats[j];
           if (stats == NULL)
             continue;
 
           Stats *update
-              = statstable_get (&solution, stats->key, stats->key_len);
+              = statstable_get (solution, stats->key, stats->key_len);
           update->sum += stats->sum;
           update->count += stats->count;
           update->max = MAX (update->max, stats->max);
@@ -335,8 +334,8 @@ multi_core_run (Arena *a, char *data, size_t data_len)
         }
     }
 
-  qsort (solution.stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
-  statstable_print (&solution);
+  qsort (solution->stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
+  statstable_print (solution);
 }
 
 int
@@ -374,7 +373,9 @@ main (int argc, char **argv)
     }
 #endif
 
-  Arena *a = arena_new ();
-  // single_core_run (a, data, sb.st_size);
-  multi_core_run (a, data, sb.st_size);
+  // single_core_run (data, sb.st_size);
+  {
+    Arena *a = arena_new ();
+    multi_core_run (a, data, sb.st_size);
+  }
 }
