@@ -21,7 +21,7 @@
 // modulo.
 #define TABLE_STATS_CAP (1UL << 14)
 
-#define HASH_PRIME 37
+#define HASH_PRIME 31
 
 ////
 // Arena code modified from
