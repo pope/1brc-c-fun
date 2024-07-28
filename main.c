@@ -21,6 +21,13 @@
 // modulo.
 #define TABLE_STATS_CAP (1UL << 14)
 
+// If we assume that there will be max stations, and each station has the max
+// name length, and all values that are printed out are 4 characters long, we
+// would be reserving something 2^20 and 2^22. That said, that's worst case -
+// and since we're trying to be fast, we can cheat with a smaller buffer size.
+// Still should protect against an overflow.
+#define OUTPUT_BUFSIZE (1UL << 14)
+
 #define HASH_PRIME 31
 
 ////
@@ -46,7 +53,7 @@ arena_new (void)
   if (cap == -1)
     {
       perror ("arena");
-      exit (1);
+      exit (EXIT_FAILURE);
     }
 
   Arena *result = mmap (0, KNOB_MMAP_SIZE, PROT_NONE,
@@ -54,14 +61,14 @@ arena_new (void)
   if (result == MAP_FAILED)
     {
       perror ("arena");
-      exit (1);
+      exit (EXIT_FAILURE);
     }
 
   int status = mprotect (result, cap, PROT_WRITE | PROT_READ);
   if (status == -1)
     {
       perror ("arena");
-      exit (1);
+      exit (EXIT_FAILURE);
     }
 
   result->data = &result[1];
@@ -82,7 +89,7 @@ arena_alloc (struct arena *a, size_t size)
   if (cap == -1)
     {
       perror ("arena");
-      exit (1);
+      exit (EXIT_FAILURE);
     }
 
   int start = a->used;
@@ -99,7 +106,7 @@ arena_alloc (struct arena *a, size_t size)
       if (status == -1)
         {
           perror ("arena");
-          exit (1);
+          exit (EXIT_FAILURE);
         }
     }
   a->used = start + size;
@@ -253,45 +260,142 @@ process (char *data, size_t data_len)
   return table;
 }
 
-static inline void
-statstable__print_stats (Stats *stats)
+static inline size_t
+statstable__stats_to_str (char *buf, size_t maxlen, const Stats *stats)
 {
   float avg = (float)stats->sum / (float)stats->count;
-  printf ("%s=%.1f/%.1f/%.1f", stats->key, (float)stats->min / 10.0,
-          avg / 10.0, (float)stats->max / 10.0);
+  size_t len = snprintf (buf, maxlen, "%s=%.1f/%.1f/%.1f", stats->key,
+                         (float)stats->min / 10.0, avg / 10.0,
+                         (float)stats->max / 10.0);
+  return MIN (maxlen, len);
 }
 
-static inline void
-statstable_print (StatsTable *table)
+static inline size_t
+statstable_to_str (char *buf, size_t maxlen, const StatsTable *table)
 {
-  printf ("{");
+  char *s = buf;
+  if (maxlen >= 1)
+    {
+      *buf++ = '{';
+      maxlen--;
+    }
   {
     Stats *stats = table->stats[0];
     assert (stats);
-    statstable__print_stats (stats);
+    size_t n = statstable__stats_to_str (buf, maxlen, stats);
+    buf += n;
+    maxlen -= n;
   }
   for (size_t i = 1; i < TABLE_STATS_CAP; i++)
     {
       Stats *stats = table->stats[i];
       if (stats == NULL)
+        // The data is sorted, so once we see a NULL, there's nothing left to
+        // print.
         break;
-      printf (", ");
-      statstable__print_stats (stats);
+      if (maxlen >= 2)
+        {
+          *buf++ = ',';
+          *buf++ = ' ';
+          maxlen -= 2;
+        }
+      size_t n = statstable__stats_to_str (buf, maxlen, stats);
+      buf += n;
+      maxlen -= n;
     }
-  printf ("}\n");
+  if (maxlen >= 2)
+    {
+      *buf++ = '}';
+      *buf++ = '\n';
+      maxlen -= 2;
+    }
+
+  *buf = 0;
+
+  return buf - s - (maxlen == 0 ? 1 : 0);
 }
 
-void
-single_core_run (char *data, size_t data_len)
+int
+main (int argc, char **argv)
 {
-  StatsTable *table = process (data, data_len);
-  qsort (table->stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
-  statstable_print (table);
-}
+  char output_buf[OUTPUT_BUFSIZE];
 
-void
-multi_core_run (Arena *a, char *data, size_t data_len)
-{
+  // From https://github.com/dannyvankooten/1brc/blob/main/analyze.c.
+  // Use a child process to do all of the work. The child then sends the data
+  // over to the parent to be printed. While the parent is printing, the
+  // child is cleaning up it's memory.
+  //
+  // Trying this using threads with OpenMP - where one thread prints data and
+  // the other cleans up - didn't help. Actually forking did.
+  int pipefd[2];
+  if (pipe (pipefd) != 0)
+    {
+      perror ("pipe");
+      return EXIT_FAILURE;
+    }
+
+  pid_t pid = fork ();
+  if (pid > 0)
+    {
+      if (close (pipefd[1]) != 0)
+        {
+          perror ("close");
+          return EXIT_FAILURE;
+        }
+
+      if (read (pipefd[0], &output_buf, OUTPUT_BUFSIZE) == -1)
+        {
+          perror ("read");
+          return EXIT_FAILURE;
+        }
+      printf ("%s", output_buf);
+
+      if (close (pipefd[0]) != 0)
+        {
+          perror ("close");
+          return EXIT_FAILURE;
+        }
+      return EXIT_SUCCESS;
+    }
+
+  if (close (pipefd[0]) != 0)
+    {
+      perror ("close");
+      return EXIT_FAILURE;
+    }
+
+  char *measurements_filename = argc == 2 ? argv[1] : "./measurements-1k.txt";
+  int fd = open (measurements_filename, O_RDONLY);
+  if (fd == -1)
+    {
+      perror ("open");
+      return EXIT_FAILURE;
+    }
+
+  struct stat sb = { 0 };
+  if (fstat (fd, &sb) == -1)
+    {
+      perror ("fstat");
+      return EXIT_FAILURE;
+    }
+
+  char *data
+      = mmap (NULL, sb.st_size, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, fd, 0);
+  if (data == MAP_FAILED)
+    {
+      perror ("mmap");
+      return EXIT_FAILURE;
+    }
+#ifdef _DEFAULT_SOURCE
+  if (madvise (data, sb.st_size, MADV_WILLNEED | MADV_RANDOM) == -1)
+    {
+      perror ("madvise");
+      return EXIT_FAILURE;
+    }
+#endif
+
+  Arena *a = arena_new ();
+
   int batches = omp_get_max_threads ();
   assert (batches > 0);
 
@@ -300,7 +404,7 @@ multi_core_run (Arena *a, char *data, size_t data_len)
 #pragma omp parallel for
   for (int i = 0; i < batches; i++)
     {
-      size_t s = i * (data_len / batches);
+      size_t s = i * (sb.st_size / batches);
       if (!(s == 0 || data[s - 1] == '\n'))
         {
           while (data[s] != '\n')
@@ -308,8 +412,8 @@ multi_core_run (Arena *a, char *data, size_t data_len)
           s++; // consume the newline
         }
 
-      size_t e = MIN ((i + 1) * (data_len / batches), data_len);
-      if (!(e == data_len || data[e] == '\n'))
+      size_t e = MIN ((i + 1) * (sb.st_size / batches), sb.st_size);
+      if (!(e == (size_t)sb.st_size || data[e] == '\n'))
         {
           while (data[e] != '\n')
             e++;
@@ -338,47 +442,19 @@ multi_core_run (Arena *a, char *data, size_t data_len)
     }
 
   qsort (solution->stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
-  statstable_print (solution);
-}
-
-int
-main (int argc, char **argv)
-{
-  char *measurements_filename = argc == 2 ? argv[1] : "./measurements-1k.txt";
-  int fd = open (measurements_filename, O_RDONLY);
-  if (fd == -1)
+  size_t output_buf_len
+      = statstable_to_str (output_buf, OUTPUT_BUFSIZE, solution);
+  if (write (pipefd[1], output_buf, output_buf_len) == -1)
     {
-      perror ("open");
+      perror ("write");
       return EXIT_FAILURE;
     }
 
-  struct stat sb = { 0 };
-  int ok = fstat (fd, &sb);
-  if (ok == -1)
+  if (close (pipefd[1]) != 0)
     {
-      perror ("fstat");
+      perror ("close");
       return EXIT_FAILURE;
     }
 
-  char *data
-      = mmap (NULL, sb.st_size, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, fd, 0);
-  if (data == MAP_FAILED)
-    {
-      perror ("mmap");
-      return EXIT_FAILURE;
-    }
-#ifdef _DEFAULT_SOURCE
-  ok = madvise (data, sb.st_size, MADV_WILLNEED | MADV_RANDOM);
-  if (ok == -1)
-    {
-      perror ("madvise");
-      return EXIT_FAILURE;
-    }
-#endif
-
-  // single_core_run (data, sb.st_size);
-  {
-    Arena *a = arena_new ();
-    multi_core_run (a, data, sb.st_size);
-  }
+  return EXIT_SUCCESS;
 }
