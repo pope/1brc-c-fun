@@ -21,6 +21,8 @@
 // modulo.
 #define TABLE_STATS_CAP (1UL << 14)
 
+#define HASH_PRIME 37
+
 ////
 // Arena code modified from
 // https://github.com/lzace817/examples/tree/master/arena
@@ -37,7 +39,7 @@ typedef struct arena
   size_t used;
 } Arena;
 
-struct arena *
+static inline struct arena *
 arena_new (void)
 {
   long cap = sysconf (_SC_PAGE_SIZE);
@@ -70,7 +72,7 @@ arena_new (void)
   return result;
 }
 
-void *
+static inline void *
 arena_alloc (struct arena *a, size_t size)
 {
   assert (a);
@@ -106,19 +108,19 @@ arena_alloc (struct arena *a, size_t size)
 }
 ////
 
-size_t
+static inline size_t
 simple_hash_string (char *str)
 {
   size_t h = 0;
   while (*str)
-    h = (h * 31) + (unsigned char)*str++;
+    h = (h * HASH_PRIME) + (unsigned char)*str++;
   return h;
 }
 
 typedef struct stats
 {
-  int sum;
-  int count;
+  long sum;
+  size_t count;
   int min;
   int max;
   size_t key_len;
@@ -131,21 +133,20 @@ typedef struct stablstable
   Stats *stats[TABLE_STATS_CAP];
 } StatsTable;
 
-Stats *
-statstable_get (StatsTable *table, char *key, size_t key_len)
+static inline Stats *
+statstable_get (StatsTable *table, char *key, size_t key_len, size_t hash)
 {
   assert (table != NULL);
   assert (key != NULL);
   assert (key_len > 0);
 
-  size_t h = simple_hash_string (key);
-  size_t idx = h & (TABLE_STATS_CAP - 1);
-  Stats *found = table->stats[h & idx];
+  size_t idx = hash & (TABLE_STATS_CAP - 1);
+  Stats *found = table->stats[hash & idx];
   while (found != NULL && found->key_len != key_len
-         && strncmp (found->key, key, key_len) != 0)
+         && memcmp (found->key, key, key_len) != 0)
     {
-      h += 1;
-      idx = h & (TABLE_STATS_CAP - 1);
+      hash += 1;
+      idx = hash & (TABLE_STATS_CAP - 1);
       found = table->stats[idx];
     }
 
@@ -155,10 +156,11 @@ statstable_get (StatsTable *table, char *key, size_t key_len)
       Stats *stat = arena_alloc (table->a, size);
       stat->max = INT_MIN;
       stat->min = INT_MAX;
-      stat->sum = 0;
-      stat->count = 0;
+      stat->sum = 0L;
+      stat->count = 0UL;
       stat->key_len = key_len;
-      strncpy (stat->key, key, key_len);
+      memcpy (stat->key, key, key_len);
+      stat->key[key_len] = 0;
       table->stats[idx] = stat;
       return stat;
     }
@@ -166,7 +168,7 @@ statstable_get (StatsTable *table, char *key, size_t key_len)
   return found;
 }
 
-static int
+static inline int
 stats__cmp (const void *aa, const void *bb)
 {
   const Stats *a = *(Stats **)aa;
@@ -182,7 +184,7 @@ stats__cmp (const void *aa, const void *bb)
   return strcmp (a->key, b->key);
 }
 
-StatsTable *
+static inline StatsTable *
 process (char *data, size_t data_len)
 {
   assert (data);
@@ -192,22 +194,24 @@ process (char *data, size_t data_len)
   StatsTable *table = arena_alloc (a, sizeof (StatsTable));
   table->a = a;
 
-  char key[MAX_STATION_NAME_LENGTH];
-
   size_t s = 0;
   while (s < data_len && data[s] != 0)
     {
-      // Get the key, reusing the key buffer
+      // Get the key and hash, reusing the key buffer. Getting the hash here is
+      // one less loop we need to do.
+      size_t hash = 0;
+      char *key = NULL;
+      size_t key_len = 0;
       {
         size_t e = s;
         while (data[e] != ';')
-          e++;
+          {
+            hash = (hash * HASH_PRIME) + (unsigned char)data[e++];
+          }
 
-        size_t len = e - s;
-        assert (len < MAX_STATION_NAME_LENGTH);
-
-        strncpy (key, data + s, len);
-        key[len] = 0;
+        key_len = e - s;
+        assert (key_len < MAX_STATION_NAME_LENGTH);
+        key = &data[s];
 
         s = e + 1;
       }
@@ -240,7 +244,7 @@ process (char *data, size_t data_len)
       assert (data[s] == '\n');
       s++;
 
-      Stats *stats = statstable_get (table, key, strlen (key));
+      Stats *stats = statstable_get (table, key, key_len, hash);
       stats->count++;
       stats->sum += temp;
       stats->max = MAX (stats->max, temp);
@@ -258,7 +262,7 @@ statstable__print_stats (Stats *stats)
           avg / 10.0, (float)stats->max / 10.0);
 }
 
-void
+static inline void
 statstable_print (StatsTable *table)
 {
   printf ("{");
@@ -325,8 +329,8 @@ multi_core_run (Arena *a, char *data, size_t data_len)
           if (stats == NULL)
             continue;
 
-          Stats *update
-              = statstable_get (solution, stats->key, stats->key_len);
+          Stats *update = statstable_get (solution, stats->key, stats->key_len,
+                                          simple_hash_string (stats->key));
           update->sum += stats->sum;
           update->count += stats->count;
           update->max = MAX (update->max, stats->max);
