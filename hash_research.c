@@ -1,7 +1,6 @@
 #include "fcntl.h"
 #include "sys/mman.h"
 #include "sys/stat.h"
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,14 +44,26 @@ main (void)
   char *data;
   {
     int fd = open ("./weather-stations.txt", O_RDONLY);
-    assert (fd != -1);
+    if (fd == -1)
+      {
+        perror ("open");
+        return EXIT_FAILURE;
+      }
 
     struct stat sb = { 0 };
     int ok = fstat (fd, &sb);
-    assert (ok != -1);
+    if (ok == -1)
+      {
+        perror ("fstat");
+        return EXIT_FAILURE;
+      }
 
     data = mmap (NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
-    assert (data != MAP_FAILED);
+    if (data == MAP_FAILED)
+      {
+        perror ("mmap");
+        return EXIT_FAILURE;
+      }
   }
 
   char buf[1024];
