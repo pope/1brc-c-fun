@@ -43,7 +43,7 @@ typedef struct arena
   void *data;
   size_t capacity;
   size_t mapped_cap;
-  size_t used;
+  size_t size;
 } Arena;
 
 static inline struct arena *
@@ -72,7 +72,7 @@ arena_new (void)
     }
 
   result->data = &result[1];
-  result->used = 0;
+  result->size = 0;
   result->capacity = cap - sizeof (Arena);
   result->mapped_cap = cap;
 
@@ -92,12 +92,10 @@ arena_alloc (struct arena *a, size_t size)
       exit (EXIT_FAILURE);
     }
 
-  int start = a->used;
-  void *result = (char *)a->data + start;
-  if (start + size > a->capacity)
+  if (a->size + size > a->capacity)
     {
       // grow
-      size_t grow_ammount = start + size - a->capacity;
+      size_t grow_ammount = a->size + size - a->capacity;
       grow_ammount = ALIGN_UP (grow_ammount, cap);
       assert (a->mapped_cap + grow_ammount <= KNOB_MMAP_SIZE);
       a->mapped_cap += grow_ammount;
@@ -109,8 +107,9 @@ arena_alloc (struct arena *a, size_t size)
           exit (EXIT_FAILURE);
         }
     }
-  a->used = start + size;
 
+  void *result = (char *)a->data + a->size;
+  a->size += size;
   return result;
 }
 ////
