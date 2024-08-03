@@ -84,7 +84,7 @@ main (void)
               stbds_hash_string (buf, 2147483587),
               stbds_hash_string (buf, 2147483587) & ((1UL << 16) - 1));
       printf ("smpl\t\"%s\"\t%u\t%u\n", buf, simple_hash_string (buf),
-              simple_hash_string (buf) & ((1U << 17) - 1));
+              simple_hash_string (buf) & ((1U << 16) - 1));
 
       s = e + 1;
     }
