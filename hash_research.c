@@ -29,7 +29,7 @@ stbds_hash_string (char *str, size_t seed)
   return hash + seed;
 }
 
-size_t
+unsigned int
 simple_hash_string (char *str)
 {
   size_t h = 0;
@@ -78,10 +78,11 @@ main (void)
       strncpy (buf, data + s, len);
       buf[len] = 0;
 
-      printf ("stbds\t\"%s\"\t%zu\n", buf,
+      printf ("stbds\t\"%s\"\t%zu\t%zu\n", buf,
+              stbds_hash_string (buf, 2147483587),
               stbds_hash_string (buf, 2147483587) & ((1UL << 16) - 1));
-      printf ("smpl\t\"%s\"\t%zu\n", buf,
-              simple_hash_string (buf) & ((1UL << 16) - 1));
+      printf ("smpl\t\"%s\"\t%u\t%u\n", buf, simple_hash_string (buf),
+              simple_hash_string (buf) & ((1U << 17) - 1));
 
       s = e + 1;
     }
