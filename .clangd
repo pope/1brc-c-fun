@@ -1,0 +1,19 @@
+CompileFlags:
+  Add: [
+    -std=c99,
+    -Wall,
+    -Wextra,
+    -Wpedantic,
+    -Weverything,
+    -Wno-declaration-after-statement,
+    -Wno-pointer-arith,
+    -Wno-unsafe-buffer-usage,
+    -Wno-source-uses-openmp,
+  ]
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+  Designators: Yes
+  BlockEnd: Yes
+  TypeNameLimit: 0

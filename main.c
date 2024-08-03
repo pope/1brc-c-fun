@@ -64,7 +64,7 @@ arena_new (void)
       exit (EXIT_FAILURE);
     }
 
-  int status = mprotect (result, cap, PROT_WRITE | PROT_READ);
+  int status = mprotect (result, (size_t)cap, PROT_WRITE | PROT_READ);
   if (status == -1)
     {
       perror ("arena");
@@ -73,8 +73,8 @@ arena_new (void)
 
   result->data = &result[1];
   result->size = 0;
-  result->capacity = cap - sizeof (Arena);
-  result->mapped_cap = cap;
+  result->capacity = (size_t)cap - sizeof (Arena);
+  result->mapped_cap = (size_t)cap;
 
   return result;
 }
@@ -96,7 +96,7 @@ arena_alloc (struct arena *a, size_t size)
     {
       // grow
       size_t grow_ammount = a->size + size - a->capacity;
-      grow_ammount = ALIGN_UP (grow_ammount, cap);
+      grow_ammount = ALIGN_UP (grow_ammount, (size_t)cap);
       assert (a->mapped_cap + grow_ammount <= KNOB_MMAP_SIZE);
       a->mapped_cap += grow_ammount;
       a->capacity += grow_ammount;
@@ -177,8 +177,8 @@ statstable_get (StatsTable *table, char *key, size_t key_len, size_t hash)
 static inline int
 stats__cmp (const void *aa, const void *bb)
 {
-  const Stats *a = *(Stats **)aa;
-  const Stats *b = *(Stats **)bb;
+  const Stats *a = *(Stats *const *)aa;
+  const Stats *b = *(Stats *const *)bb;
 
   if (a == NULL && b == NULL)
     return 0;
@@ -262,11 +262,13 @@ process (char *data, size_t data_len)
 static inline size_t
 statstable__stats_to_str (char *buf, size_t maxlen, const Stats *stats)
 {
-  float avg = (float)stats->sum / (float)stats->count;
-  size_t len = snprintf (buf, maxlen, "%s=%.1f/%.1f/%.1f", stats->key,
-                         (float)stats->min / 10.0, avg / 10.0,
-                         (float)stats->max / 10.0);
-  return MIN (maxlen, len);
+  double avg = ((double)stats->sum / (double)stats->count) / 10.0;
+  double min = (double)stats->min / 10.0;
+  double max = (double)stats->max / 10.0;
+  int len
+      = snprintf (buf, maxlen, "%s=%.1f/%.1f/%.1f", stats->key, min, avg, max);
+  assert (len >= 0);
+  return MIN (maxlen, (size_t)len);
 }
 
 static inline size_t
@@ -311,7 +313,8 @@ statstable_to_str (char *buf, size_t maxlen, const StatsTable *table)
 
   *buf = 0;
 
-  return buf - s - (maxlen == 0 ? 1 : 0);
+  assert (buf >= s);
+  return (size_t)(buf - s) - (maxlen == 0 ? 1UL : 0UL);
 }
 
 int
@@ -378,8 +381,8 @@ main (int argc, char **argv)
       return EXIT_FAILURE;
     }
 
-  char *data
-      = mmap (NULL, sb.st_size, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, fd, 0);
+  char *data = mmap (NULL, (size_t)sb.st_size, PROT_READ,
+                     MAP_PRIVATE | MAP_NORESERVE, fd, 0);
   if (data == MAP_FAILED)
     {
       perror ("mmap");
@@ -398,12 +401,13 @@ main (int argc, char **argv)
   int batches = omp_get_max_threads ();
   assert (batches > 0);
 
-  StatsTable **batch_res = arena_alloc (a, sizeof (StatsTable *) * batches);
+  StatsTable **batch_res
+      = arena_alloc (a, sizeof (StatsTable *) * (size_t)batches);
 
 #pragma omp parallel for
-  for (int i = 0; i < batches; i++)
+  for (size_t i = 0; i < (size_t)batches; i++)
     {
-      size_t s = i * (sb.st_size / batches);
+      size_t s = i * ((size_t)sb.st_size / (size_t)batches);
       if (!(s == 0 || data[s - 1] == '\n'))
         {
           while (data[s] != '\n')
@@ -411,7 +415,8 @@ main (int argc, char **argv)
           s++; // consume the newline
         }
 
-      size_t e = MIN ((i + 1) * (sb.st_size / batches), sb.st_size);
+      size_t e = MIN ((i + 1) * ((size_t)sb.st_size / (size_t)batches),
+                      (size_t)sb.st_size);
       if (!(e == (size_t)sb.st_size || data[e] == '\n'))
         {
           while (data[e] != '\n')

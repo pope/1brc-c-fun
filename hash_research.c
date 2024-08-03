@@ -1,9 +1,10 @@
-#include "fcntl.h"
-#include "sys/mman.h"
-#include "sys/stat.h"
+#include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 #define STBDS_SIZE_T_BITS ((sizeof (size_t)) * 8)
 #define STBDS_ROTATE_LEFT(val, n)                                             \
@@ -11,7 +12,7 @@
 #define STBDS_ROTATE_RIGHT(val, n)                                            \
   (((val) >> (n)) | ((val) << (STBDS_SIZE_T_BITS - (n))))
 
-size_t
+static size_t
 stbds_hash_string (char *str, size_t seed)
 {
   size_t hash = seed;
@@ -29,10 +30,10 @@ stbds_hash_string (char *str, size_t seed)
   return hash + seed;
 }
 
-unsigned int
+static unsigned int
 simple_hash_string (char *str)
 {
-  size_t h = 0;
+  unsigned int h = 0;
   while (*str)
     h = (h * 31) + (unsigned char)*str++;
   return h;
@@ -58,7 +59,7 @@ main (void)
         return EXIT_FAILURE;
       }
 
-    data = mmap (NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    data = mmap (NULL, (size_t)sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
     if (data == MAP_FAILED)
       {
         perror ("mmap");
@@ -75,6 +76,7 @@ main (void)
         e++;
 
       size_t len = e - s;
+      assert (len < 1024);
       strncpy (buf, data + s, len);
       buf[len] = 0;
 
