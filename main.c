@@ -114,15 +114,6 @@ arena_alloc (struct arena *a, size_t size)
 }
 ////
 
-static inline unsigned int
-simple_hash_string (char *str)
-{
-  unsigned int h = 0;
-  while (*str)
-    h = (h * HASH_PRIME) + (unsigned char)*str++;
-  return h;
-}
-
 typedef struct stats
 {
   long sum;
@@ -135,8 +126,7 @@ typedef struct station
 {
   // TODO(pope): Write my own sort so that I don't need this
   unsigned int stats_index;
-  unsigned short key_len;
-  char padding[2];
+  unsigned int hash;
   char key[];
 } Station;
 
@@ -193,7 +183,7 @@ statstable_get (StatsTable *table, char *key, unsigned short key_len,
       Station *station = arena_alloc (
           table->a, sizeof (Station) + sizeof (char) * (key_len + 1));
       station->stats_index = (unsigned int)table->size;
-      station->key_len = key_len;
+      station->hash = hash;
       memcpy (station->key, key, key_len);
       station->key[key_len] = 0;
 
@@ -209,11 +199,28 @@ statstable_get (StatsTable *table, char *key, unsigned short key_len,
 
 #ifndef NDEBUG
   Station *station = table->stations[table->entries[i].idx];
-  assert (key_len == station->key_len);
+  assert (key_len == strlen (station->key));
   assert (strncmp (key, station->key, key_len) == 0);
   assert (station->stats_index == table->entries[i].idx);
 #endif
 
+  return &table->stats[table->entries[i].idx];
+}
+
+static inline Stats *
+statstable_find_by_hash (StatsTable *table, unsigned int hash)
+{
+  assert (table != NULL);
+  assert (table->size * 2 < TABLE_STATS_CAP - 1);
+  assert (hash != 0);
+
+  unsigned int i = hash & (TABLE_STATS_CAP - 1);
+  while (table->entries[i].hash != 0 && table->entries[i].hash != hash)
+    i = (i + 1) & (TABLE_STATS_CAP - 1);
+
+  // New entry
+  if (table->entries[i].hash == 0)
+    return NULL;
   return &table->stats[table->entries[i].idx];
 }
 
@@ -474,9 +481,12 @@ main (int argc, char **argv)
           assert (station != NULL);
           assert (station->stats_index == j);
 
-          Stats *update
-              = statstable_get (solution, station->key, station->key_len,
-                                simple_hash_string (station->key));
+          Stats *update = statstable_find_by_hash (solution, station->hash);
+          if (update == NULL)
+            update = statstable_get (solution, station->key,
+                                     (unsigned short)strlen (station->key),
+                                     station->hash);
+
           update->sum += stats->sum;
           update->count += stats->count;
           update->max = MAX (update->max, stats->max);
