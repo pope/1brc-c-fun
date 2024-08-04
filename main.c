@@ -163,6 +163,7 @@ statstable_alloc (Arena *a)
   table->size = 0;
   memset (table->entries, 0, sizeof (table->entries));
   memset (table->stats, 0, sizeof (table->stats));
+  memset (table->stations, 0, sizeof (table->stations));
   return table;
 }
 
@@ -178,7 +179,7 @@ statstable_get (StatsTable *table, char *key, unsigned short key_len,
 
   unsigned int i = hash & (TABLE_STATS_CAP - 1);
   while (table->entries[i].hash != 0 && table->entries[i].hash != hash)
-    i = ++hash & (TABLE_STATS_CAP - 1);
+    i = (i + 1) & (TABLE_STATS_CAP - 1);
 
   // New entry
   if (table->entries[i].hash == 0)
