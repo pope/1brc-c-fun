@@ -37,6 +37,8 @@
             treefmtEval.${system}.config.build.wrapper
           ] ++ lib.optionals stdenv.isLinux [
             gdb
+            # perf-tools
+            linuxPackages.perf
           ];
           CFLAGS = "-D_DEFAULT_SOURCE";
         };
