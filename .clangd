@@ -9,6 +9,7 @@ CompileFlags:
     -Wno-pointer-arith,
     -Wno-unsafe-buffer-usage,
     -Wno-source-uses-openmp,
+    -D_DEFAULT_SOURCE,
   ]
 InlayHints:
   Enabled: Yes

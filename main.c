@@ -114,80 +114,124 @@ arena_alloc (struct arena *a, size_t size)
 }
 ////
 
-static inline size_t
-simple_hash_string (char *str)
-{
-  size_t h = 0;
-  while (*str)
-    h = (h * HASH_PRIME) + (unsigned char)*str++;
-  return h;
-}
-
 typedef struct stats
 {
   long sum;
-  size_t count;
-  int min;
-  int max;
-  size_t key_len;
-  char key[];
+  unsigned int count;
+  short min;
+  short max;
 } Stats;
 
-typedef struct stablstable
+typedef struct station
+{
+  // TODO(pope): Write my own sort so that I don't need this
+  unsigned int stats_index;
+  unsigned int hash;
+  char key[];
+} Station;
+
+typedef struct statsentry
+{
+  unsigned int hash;
+  unsigned int idx;
+} StatsEntry;
+
+typedef struct statstable
 {
   Arena *a;
-  Stats *stats[TABLE_STATS_CAP];
+  size_t size;
+  StatsEntry entries[TABLE_STATS_CAP];
+  Stats stats[MAX_STATIONS];
+  Station *stations[MAX_STATIONS];
 } StatsTable;
 
+static inline StatsTable *
+statstable_alloc (Arena *a)
+{
+  StatsTable *table = arena_alloc (a, sizeof (StatsTable));
+  table->a = a;
+  table->size = 0;
+  memset (table->entries, 0, sizeof (table->entries));
+  memset (table->stats, 0, sizeof (table->stats));
+  memset (table->stations, 0, sizeof (table->stations));
+  return table;
+}
+
 static inline Stats *
-statstable_get (StatsTable *table, char *key, size_t key_len, size_t hash)
+statstable_get (StatsTable *table, char *key, unsigned short key_len,
+                unsigned int hash)
 {
   assert (table != NULL);
+  assert (table->size * 2 < TABLE_STATS_CAP - 1);
   assert (key != NULL);
   assert (key_len > 0);
+  assert (hash != 0);
 
-  size_t idx = hash & (TABLE_STATS_CAP - 1);
-  Stats *found = table->stats[hash & idx];
-  while (found != NULL && found->key_len != key_len
-         && memcmp (found->key, key, key_len) != 0)
-    {
-      hash += 1;
-      idx = hash & (TABLE_STATS_CAP - 1);
-      found = table->stats[idx];
-    }
+  unsigned int i = hash & (TABLE_STATS_CAP - 1);
+  while (table->entries[i].hash != 0 && table->entries[i].hash != hash)
+    i = (i + 1) & (TABLE_STATS_CAP - 1);
 
-  if (found == NULL)
+  // New entry
+  if (table->entries[i].hash == 0)
     {
-      size_t size = sizeof (Stats) + sizeof (char) * (key_len + 1);
-      Stats *stat = arena_alloc (table->a, size);
-      stat->max = INT_MIN;
-      stat->min = INT_MAX;
+      Stats *stat = &table->stats[table->size];
+      stat->max = SHRT_MIN;
+      stat->min = SHRT_MAX;
       stat->sum = 0L;
-      stat->count = 0UL;
-      stat->key_len = key_len;
-      memcpy (stat->key, key, key_len);
-      stat->key[key_len] = 0;
-      table->stats[idx] = stat;
+      stat->count = 0U;
+
+      Station *station = arena_alloc (
+          table->a, sizeof (Station) + sizeof (char) * (key_len + 1));
+      station->stats_index = (unsigned int)table->size;
+      station->hash = hash;
+      memcpy (station->key, key, key_len);
+      station->key[key_len] = 0;
+
+      table->entries[i].idx = (unsigned int)table->size;
+      table->entries[i].hash = hash;
+      table->stations[table->size] = station;
+      table->size++;
+
+      assert (table->size < TABLE_STATS_CAP);
+
       return stat;
     }
 
-  return found;
+#ifndef NDEBUG
+  Station *station = table->stations[table->entries[i].idx];
+  assert (key_len == strlen (station->key));
+  assert (strncmp (key, station->key, key_len) == 0);
+  assert (station->stats_index == table->entries[i].idx);
+#endif
+
+  return &table->stats[table->entries[i].idx];
+}
+
+static inline Stats *
+statstable_find_by_hash (StatsTable *table, unsigned int hash)
+{
+  assert (table != NULL);
+  assert (table->size * 2 < TABLE_STATS_CAP - 1);
+  assert (hash != 0);
+
+  unsigned int i = hash & (TABLE_STATS_CAP - 1);
+  while (table->entries[i].hash != 0 && table->entries[i].hash != hash)
+    i = (i + 1) & (TABLE_STATS_CAP - 1);
+
+  // New entry
+  if (table->entries[i].hash == 0)
+    return NULL;
+  return &table->stats[table->entries[i].idx];
 }
 
 static inline int
-stats__cmp (const void *aa, const void *bb)
+stations__cmp (const void *aa, const void *bb)
 {
-  const Stats *a = *(Stats *const *)aa;
-  const Stats *b = *(Stats *const *)bb;
-
-  if (a == NULL && b == NULL)
-    return 0;
-  if (b == NULL)
-    return -1;
-  if (a == NULL)
-    return 1;
-
-  return strcmp (a->key, b->key);
+  const Station *a = *(Station *const *)aa;
+  const Station *b = *(Station *const *)bb;
+  int res = strcmp (a->key, b->key);
+  assert (res != 0);
+  return res;
 }
 
 static inline StatsTable *
@@ -197,34 +241,32 @@ process (char *data, size_t data_len)
   assert (data_len > 0);
 
   Arena *a = arena_new ();
-  StatsTable *table = arena_alloc (a, sizeof (StatsTable));
-  table->a = a;
+  StatsTable *table = statstable_alloc (a);
 
   size_t s = 0;
   while (s < data_len && data[s] != 0)
     {
       // Get the key and hash, reusing the key buffer. Getting the hash here is
       // one less loop we need to do.
-      size_t hash = 0;
+      unsigned int hash = 0;
       char *key = NULL;
-      size_t key_len = 0;
+      unsigned short key_len = 0;
       {
         size_t e = s;
         while (data[e] != ';')
-          {
-            hash = (hash * HASH_PRIME) + (unsigned char)data[e++];
-          }
+          hash = (hash * HASH_PRIME) + (unsigned char)data[e++];
 
-        key_len = e - s;
-        assert (key_len < MAX_STATION_NAME_LENGTH);
+        assert (e - s < USHRT_MAX);
+        assert (e - s < MAX_STATION_NAME_LENGTH);
+        key_len = (unsigned short)(e - s);
         key = &data[s];
 
         s = e + 1;
       }
 
-      int temp = 0;
+      short temp = 0;
       {
-        int sign = 1;
+        short sign = 1;
         if (data[s] == '-')
           {
             sign = -1;
@@ -260,13 +302,14 @@ process (char *data, size_t data_len)
 }
 
 static inline size_t
-statstable__stats_to_str (char *buf, size_t maxlen, const Stats *stats)
+statstable__stats_to_str (char *buf, size_t maxlen, const Station *station,
+                          const Stats *stats)
 {
   double avg = ((double)stats->sum / (double)stats->count) / 10.0;
   double min = (double)stats->min / 10.0;
   double max = (double)stats->max / 10.0;
-  int len
-      = snprintf (buf, maxlen, "%s=%.1f/%.1f/%.1f", stats->key, min, avg, max);
+  int len = snprintf (buf, maxlen, "%s=%.1f/%.1f/%.1f", station->key, min, avg,
+                      max);
   assert (len >= 0);
   return MIN (maxlen, (size_t)len);
 }
@@ -281,26 +324,24 @@ statstable_to_str (char *buf, size_t maxlen, const StatsTable *table)
       maxlen--;
     }
   {
-    Stats *stats = table->stats[0];
-    assert (stats);
-    size_t n = statstable__stats_to_str (buf, maxlen, stats);
+    Station *station = table->stations[0];
+    const Stats *stats = &table->stats[station->stats_index];
+    size_t n = statstable__stats_to_str (buf, maxlen, station, stats);
     buf += n;
     maxlen -= n;
   }
-  for (size_t i = 1; i < TABLE_STATS_CAP; i++)
+  for (size_t i = 1; i < table->size; i++)
     {
-      Stats *stats = table->stats[i];
-      if (stats == NULL)
-        // The data is sorted, so once we see a NULL, there's nothing left to
-        // print.
-        break;
+      Station *station = table->stations[i];
+      const Stats *stats = &table->stats[station->stats_index];
+      assert (stats != NULL);
       if (maxlen >= 2)
         {
           *buf++ = ',';
           *buf++ = ' ';
           maxlen -= 2;
         }
-      size_t n = statstable__stats_to_str (buf, maxlen, stats);
+      size_t n = statstable__stats_to_str (buf, maxlen, station, stats);
       buf += n;
       maxlen -= n;
     }
@@ -322,13 +363,15 @@ main (int argc, char **argv)
 {
   char output_buf[OUTPUT_BUFSIZE];
 
+#ifndef NO_CHILD_PROCESS
   // From https://github.com/dannyvankooten/1brc/blob/main/analyze.c.
   // Use a child process to do all of the work. The child then sends the data
   // over to the parent to be printed. While the parent is printing, the
   // child is cleaning up it's memory.
   //
-  // Trying this using threads with OpenMP - where one thread prints data and
-  // the other cleans up - didn't help. Actually forking did.
+  // Trying this using threads with OpenMP - wsystemctl --user
+  // import-environment QT_QPA_PLATFORMTHEMEhere one thread prints data and the
+  // other cleans up - didn't help. Actually forking did.
   int pipefd[2];
   if (pipe (pipefd) != 0)
     {
@@ -365,6 +408,7 @@ main (int argc, char **argv)
       perror ("close");
       return EXIT_FAILURE;
     }
+#endif
 
   char *measurements_filename = argc == 2 ? argv[1] : "./measurements-1k.txt";
   int fd = open (measurements_filename, O_RDONLY);
@@ -389,7 +433,7 @@ main (int argc, char **argv)
       return EXIT_FAILURE;
     }
 #ifdef _DEFAULT_SOURCE
-  if (madvise (data, sb.st_size, MADV_WILLNEED | MADV_RANDOM) == -1)
+  if (madvise (data, (size_t)sb.st_size, MADV_WILLNEED | MADV_RANDOM) == -1)
     {
       perror ("madvise");
       return EXIT_FAILURE;
@@ -430,14 +474,19 @@ main (int argc, char **argv)
   for (int i = 1; i < batches; i++)
     {
       StatsTable *table = batch_res[i];
-      for (size_t j = 0; j < TABLE_STATS_CAP; j++)
+      for (size_t j = 0; j < table->size; j++)
         {
-          Stats *stats = table->stats[j];
-          if (stats == NULL)
-            continue;
+          Station *station = table->stations[j];
+          Stats *stats = &table->stats[j];
+          assert (station != NULL);
+          assert (station->stats_index == j);
 
-          Stats *update = statstable_get (solution, stats->key, stats->key_len,
-                                          simple_hash_string (stats->key));
+          Stats *update = statstable_find_by_hash (solution, station->hash);
+          if (update == NULL)
+            update = statstable_get (solution, station->key,
+                                     (unsigned short)strlen (station->key),
+                                     station->hash);
+
           update->sum += stats->sum;
           update->count += stats->count;
           update->max = MAX (update->max, stats->max);
@@ -445,9 +494,11 @@ main (int argc, char **argv)
         }
     }
 
-  qsort (solution->stats, TABLE_STATS_CAP, sizeof (Stats *), stats__cmp);
+  qsort (solution->stations, solution->size, sizeof (Stats *), stations__cmp);
   size_t output_buf_len
       = statstable_to_str (output_buf, OUTPUT_BUFSIZE, solution);
+
+#ifndef NO_CHILD_PROCESS
   if (write (pipefd[1], output_buf, output_buf_len) == -1)
     {
       perror ("write");
@@ -459,6 +510,9 @@ main (int argc, char **argv)
       perror ("close");
       return EXIT_FAILURE;
     }
+#else
+  printf ("%s", output_buf);
+#endif
 
   return EXIT_SUCCESS;
 }
