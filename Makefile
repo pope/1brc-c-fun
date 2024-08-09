@@ -14,3 +14,6 @@ hash_research: hash_research.c
 
 clean:
 	-rm -rf main hash_research *.dSYM
+
+compile_commands.json: Makefile
+	make clean && bear -- make

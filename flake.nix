@@ -30,6 +30,7 @@
       devShells = eachSystem (pkgs: {
         default = with pkgs; mkShell {
           packages = [
+            bear
             clang-tools
             hyperfine
             lldb
