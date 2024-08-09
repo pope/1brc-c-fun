@@ -4,3 +4,8 @@ gmon.out
 hash_research
 main
 measurements.txt
+readtests/fgets
+readtests/fread
+readtests/fread_omp
+readtests/mmap
+readtests/mmap_omp
