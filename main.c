@@ -124,10 +124,9 @@ typedef struct stats
 
 typedef struct station
 {
-  // TODO(pope): Write my own sort so that I don't need this
-  unsigned int stats_index;
   unsigned int hash;
-  char key[];
+  unsigned int key_len;
+  char *key;
 } Station;
 
 typedef struct statsentry
@@ -142,7 +141,7 @@ typedef struct statstable
   size_t size;
   StatsEntry entries[TABLE_STATS_CAP];
   Stats stats[MAX_STATIONS];
-  Station *stations[MAX_STATIONS];
+  Station stations[MAX_STATIONS];
 } StatsTable;
 
 static inline StatsTable *
@@ -158,7 +157,7 @@ statstable_alloc (Arena *a)
 }
 
 static inline Stats *
-statstable_get (StatsTable *table, char *key, unsigned short key_len,
+statstable_get (StatsTable *table, char *key, unsigned int key_len,
                 unsigned int hash)
 {
   assert (table != NULL);
@@ -180,16 +179,13 @@ statstable_get (StatsTable *table, char *key, unsigned short key_len,
       stat->sum = 0L;
       stat->count = 0U;
 
-      Station *station = arena_alloc (
-          table->a, sizeof (Station) + sizeof (char) * (key_len + 1));
-      station->stats_index = (unsigned int)table->size;
+      Station *station = &table->stations[table->size];
       station->hash = hash;
-      memcpy (station->key, key, key_len);
-      station->key[key_len] = 0;
+      station->key_len = key_len;
+      station->key = key;
 
       table->entries[i].idx = (unsigned int)table->size;
       table->entries[i].hash = hash;
-      table->stations[table->size] = station;
       table->size++;
 
       assert (table->size < TABLE_STATS_CAP);
@@ -199,9 +195,8 @@ statstable_get (StatsTable *table, char *key, unsigned short key_len,
 
 #ifndef NDEBUG
   Station *station = table->stations[table->entries[i].idx];
-  assert (key_len == strlen (station->key));
+  assert (key_len == station->key_len);
   assert (strncmp (key, station->key, key_len) == 0);
-  assert (station->stats_index == table->entries[i].idx);
 #endif
 
   return &table->stats[table->entries[i].idx];
@@ -224,14 +219,62 @@ statstable_find_by_hash (StatsTable *table, unsigned int hash)
   return &table->stats[table->entries[i].idx];
 }
 
-static inline int
-stations__cmp (const void *aa, const void *bb)
+static inline size_t
+statstable__sort_partition (StatsTable *table, size_t low, size_t high)
 {
-  const Station *a = *(Station *const *)aa;
-  const Station *b = *(Station *const *)bb;
-  int res = strcmp (a->key, b->key);
-  assert (res != 0);
-  return res;
+  assert (table);
+  assert (low < high);
+
+  Stats tmpStats = { 0 };
+  Station tmpStation = { 0 };
+  Station *pivot = &table->stations[high];
+  assert (pivot);
+  size_t i = low;
+
+  for (size_t j = low; j < high; j++)
+    {
+      Station *station = &table->stations[j];
+      assert (station);
+      if (strncmp (station->key, pivot->key,
+                   MAX (station->key_len, pivot->key_len))
+          <= 0)
+        {
+          tmpStats = table->stats[i];
+          tmpStation = table->stations[i];
+          table->stats[i] = table->stats[j];
+          table->stations[i] = table->stations[j];
+          table->stats[j] = tmpStats;
+          table->stations[j] = tmpStation;
+          i++;
+        }
+    }
+
+  tmpStats = table->stats[i];
+  tmpStation = table->stations[i];
+  table->stats[i] = table->stats[high];
+  table->stations[i] = table->stations[high];
+  table->stats[high] = tmpStats;
+  table->stations[high] = tmpStation;
+
+  return i;
+}
+
+static inline void
+statstable_sort (StatsTable *table, size_t low, size_t high)
+{
+  assert (table);
+
+  if (low >= high)
+    return;
+
+  while (low < high)
+    {
+      size_t p = statstable__sort_partition (table, low, high);
+      if (p == 0)
+        return;
+      statstable_sort (table, low, p - 1);
+      low = p + 1;
+    }
 }
 
 static inline StatsTable *
@@ -250,7 +293,7 @@ process (char *data, size_t data_len)
       // one less loop we need to do.
       unsigned int hash = 0;
       char *key = NULL;
-      unsigned short key_len = 0;
+      unsigned int key_len = 0;
       {
         size_t e = s;
         while (data[e] != ';')
@@ -258,7 +301,7 @@ process (char *data, size_t data_len)
 
         assert (e - s < USHRT_MAX);
         assert (e - s < MAX_STATION_NAME_LENGTH);
-        key_len = (unsigned short)(e - s);
+        key_len = (unsigned int)(e - s);
         key = &data[s];
 
         s = e + 1;
@@ -308,8 +351,8 @@ statstable__stats_to_str (char *buf, size_t maxlen, const Station *station,
   double avg = ((double)stats->sum / (double)stats->count) / 10.0;
   double min = (double)stats->min / 10.0;
   double max = (double)stats->max / 10.0;
-  int len = snprintf (buf, maxlen, "%s=%.1f/%.1f/%.1f", station->key, min, avg,
-                      max);
+  int len = snprintf (buf, maxlen, "%.*s=%.1f/%.1f/%.1f", station->key_len,
+                      station->key, min, avg, max);
   assert (len >= 0);
   return MIN (maxlen, (size_t)len);
 }
@@ -324,16 +367,16 @@ statstable_to_str (char *buf, size_t maxlen, const StatsTable *table)
       maxlen--;
     }
   {
-    Station *station = table->stations[0];
-    const Stats *stats = &table->stats[station->stats_index];
+    const Station *station = &table->stations[0];
+    const Stats *stats = &table->stats[0];
     size_t n = statstable__stats_to_str (buf, maxlen, station, stats);
     buf += n;
     maxlen -= n;
   }
   for (size_t i = 1; i < table->size; i++)
     {
-      Station *station = table->stations[i];
-      const Stats *stats = &table->stats[station->stats_index];
+      const Station *station = &table->stations[i];
+      const Stats *stats = &table->stats[i];
       assert (stats != NULL);
       if (maxlen >= 2)
         {
@@ -476,15 +519,13 @@ main (int argc, char **argv)
       StatsTable *table = batch_res[i];
       for (size_t j = 0; j < table->size; j++)
         {
-          Station *station = table->stations[j];
+          Station *station = &table->stations[j];
           Stats *stats = &table->stats[j];
           assert (station != NULL);
-          assert (station->stats_index == j);
 
           Stats *update = statstable_find_by_hash (solution, station->hash);
           if (update == NULL)
-            update = statstable_get (solution, station->key,
-                                     (unsigned short)strlen (station->key),
+            update = statstable_get (solution, station->key, station->key_len,
                                      station->hash);
 
           update->sum += stats->sum;
@@ -494,7 +535,7 @@ main (int argc, char **argv)
         }
     }
 
-  qsort (solution->stations, solution->size, sizeof (Stats *), stations__cmp);
+  statstable_sort (solution, 0, solution->size - 1);
   size_t output_buf_len
       = statstable_to_str (output_buf, OUTPUT_BUFSIZE, solution);
 
