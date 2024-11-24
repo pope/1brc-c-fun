@@ -1,4 +1,5 @@
 *.dSYM
+.cache/
 .direnv/
 gmon.out
 hash_research

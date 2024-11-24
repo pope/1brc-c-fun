@@ -13,7 +13,7 @@ main: main.c
 hash_research: hash_research.c
 
 clean:
-	-rm -rf main hash_research *.dSYM
+	-rm -rf main hash_research *.dSYM .cache
 
 compile_commands.json: Makefile
 	make clean && bear -- make
