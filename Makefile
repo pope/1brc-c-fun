@@ -9,8 +9,8 @@ LDFLAGS += -fopenmp
 
 all: main hash_research
 
-main: main.c
-hash_research: hash_research.c
+main: main.c gperf_hash.c
+hash_research: hash_research.c gperf_hash.c
 
 clean:
 	-rm -rf main hash_research *.dSYM .cache

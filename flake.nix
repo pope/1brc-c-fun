@@ -32,6 +32,7 @@
           packages = [
             bear
             clang-tools
+            gperf
             hyperfine
             lldb
             llvmPackages_12.openmp

@@ -6,6 +6,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
+#include "gperf_hash.c"
+
 #define STBDS_SIZE_T_BITS ((sizeof (size_t)) * 8)
 #define STBDS_ROTATE_LEFT(val, n)                                             \
   (((val) << (n)) | ((val) >> (STBDS_SIZE_T_BITS - (n))))
@@ -85,6 +87,9 @@ main (void)
               stbds_hash_string (buf, 2147483587) & ((1UL << 16) - 1));
       printf ("smpl\t\"%s\"\t%u\t%u\n", buf, simple_hash_string (buf),
               simple_hash_string (buf) & ((1U << 16) - 1));
+
+      printf ("gperf\t\"%s\"\t%u\t%u\n", buf, gperf_hash (buf, len),
+              gperf_hash (buf, len) & ((1U << 16) - 1));
 
       s = e + 1;
     }
