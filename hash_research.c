@@ -35,7 +35,7 @@ simple_hash_string (char *str)
 {
   unsigned int h = 0;
   while (*str)
-    h = (h * 31) + (unsigned char)*str++;
+    h = (h * 233) + (unsigned char)*str++;
   return h;
 }
 

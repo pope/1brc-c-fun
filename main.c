@@ -28,7 +28,7 @@
 // Still should protect against an overflow.
 #define OUTPUT_BUFSIZE (1UL << 14)
 
-#define HASH_PRIME 31
+#define HASH_PRIME 233
 
 ////
 // Arena code modified from
