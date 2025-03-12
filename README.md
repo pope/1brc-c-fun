@@ -49,3 +49,9 @@ not any collisions in the hashes themselves - even in a 32bit space.
     known stations.
   - The count of all the items is less than 30 bits, and thus can fit within an
     `unsigned int`
+
+## Links
+
+  - https://curc.readthedocs.io/en/latest/programming/OpenMP-C.html
+  - https://people.cs.pitt.edu/~melhem/courses/xx45p/OpenMp.pdf
+  - https://tildesites.bowdoin.edu/~ltoma/teaching/cs3225-GIS/fall17/Lectures/openmp.html
