@@ -8,40 +8,58 @@
     };
   };
 
-  outputs = { nixpkgs, systems, treefmt-nix, ... }:
+  outputs =
+    {
+      nixpkgs,
+      systems,
+      treefmt-nix,
+      ...
+    }:
     let
-      eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f
-        (import nixpkgs {
-          inherit system;
-          config = { };
+      eachSystem =
+        f:
+        nixpkgs.lib.genAttrs (import systems) (
+          system:
+          f (
+            import nixpkgs {
+              inherit system;
+              config = { };
+            }
+          )
+        );
+      treefmtEval = eachSystem (
+        pkgs:
+        treefmt-nix.lib.evalModule pkgs (_: {
+          projectRootFile = "flake.nix";
+          programs = {
+            clang-format.enable = true;
+            deadnix.enable = true;
+            nixfmt.enable = true;
+            statix.enable = true;
+          };
         })
       );
-      treefmtEval = eachSystem (pkgs: treefmt-nix.lib.evalModule pkgs (_: {
-        projectRootFile = "flake.nix";
-        programs = {
-          clang-format.enable = true;
-          deadnix.enable = true;
-          nixpkgs-fmt.enable = true;
-          statix.enable = true;
-        };
-      }));
     in
     {
       devShells = eachSystem (pkgs: {
-        default = with pkgs; mkShell {
-          packages = [
-            bear
-            clang-tools
-            hyperfine
-            lldb
-            llvmPackages_12.openmp
-            treefmtEval.${system}.config.build.wrapper
-          ] ++ lib.optionals stdenv.isLinux [
-            gdb
-            linuxPackages.perf
-          ];
-          CFLAGS = "-D_DEFAULT_SOURCE";
-        };
+        default =
+          with pkgs;
+          mkShell {
+            packages = [
+              bear
+              clang-tools
+              hyperfine
+              lldb
+              llvmPackages.openmp
+              treefmtEval.${stdenv.hostPlatform.system}.config.build.wrapper
+            ]
+            ++ lib.optionals stdenv.isLinux [
+              gdb
+              perf
+            ];
+            CFLAGS = "-D_DEFAULT_SOURCE";
+            NIX_ENFORCE_NO_NATIVE = 0;
+          };
       });
     };
 }

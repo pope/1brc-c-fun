@@ -34,8 +34,8 @@
 // Arena code modified from
 // https://github.com/lzace817/examples/tree/master/arena
 
-#define ALIGN_DOWN(n, a) ((n) & ~((a)-1))
-#define ALIGN_UP(n, a) ALIGN_DOWN ((n) + (a)-1, (a))
+#define ALIGN_DOWN(n, a) ((n) & ~((a) - 1))
+#define ALIGN_UP(n, a) ALIGN_DOWN ((n) + (a) - 1, (a))
 #define KNOB_MMAP_SIZE (10L * 1024 * 1024 * 1024)
 
 typedef struct arena
