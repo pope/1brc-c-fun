@@ -10,6 +10,7 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // Defines for some of the rules of 1brc
@@ -24,11 +25,13 @@
 // If we assume that there will be max stations, and each station has the max
 // name length, and all values that are printed out are 4 characters long, we
 // would be reserving something 2^20 and 2^22. That said, that's worst case -
-// and since we're trying to be fast, we can cheat with a smaller buffer size.
+// and since we're trying to be fast, we can cheat with a larger buffer size.
 // Still should protect against an overflow.
-#define OUTPUT_BUFSIZE (1UL << 14)
+#define OUTPUT_BUFSIZE (1UL << 21)
 
-#define HASH_PRIME 233
+// With this value, we have a perfect hash against all of the weather station
+// entries.
+#define HASH_PRIME 2333
 
 ////
 // Arena code modified from
@@ -84,6 +87,8 @@ arena_alloc (struct arena *a, size_t size)
 {
   assert (a);
   assert (size > 0);
+
+  size = ALIGN_UP (size, 8);
 
   long cap = sysconf (_SC_PAGE_SIZE);
   if (cap == -1)
@@ -317,45 +322,60 @@ statstable__stats_to_str (char *buf, size_t maxlen, const Station *station,
 static inline size_t
 statstable_to_str (char *buf, size_t maxlen, const StatsTable *table)
 {
+  if (maxlen == 0)
+    return 0;
+
   char *s = buf;
-  if (maxlen >= 1)
+  char *end = buf + maxlen - 1; // leave 1 byte for null terminator
+
+  if (buf < end)
+    *buf++ = '{';
+
+  if (table->size > 0)
     {
-      *buf++ = '{';
-      maxlen--;
+      Station *station = table->stations[0];
+      const Stats *stats = &table->stats[station->stats_index];
+      size_t n = statstable__stats_to_str (buf, (size_t)(end - buf), station,
+                                           stats);
+      buf += n;
     }
-  {
-    Station *station = table->stations[0];
-    const Stats *stats = &table->stats[station->stats_index];
-    size_t n = statstable__stats_to_str (buf, maxlen, station, stats);
-    buf += n;
-    maxlen -= n;
-  }
+
   for (size_t i = 1; i < table->size; i++)
     {
+      if (buf < end)
+        {
+          if (end - buf >= 2)
+            {
+              *buf++ = ',';
+              *buf++ = ' ';
+            }
+          else
+            {
+              buf = end;
+            }
+        }
       Station *station = table->stations[i];
       const Stats *stats = &table->stats[station->stats_index];
-      assert (stats != NULL);
-      if (maxlen >= 2)
-        {
-          *buf++ = ',';
-          *buf++ = ' ';
-          maxlen -= 2;
-        }
-      size_t n = statstable__stats_to_str (buf, maxlen, station, stats);
+      size_t n = statstable__stats_to_str (buf, (size_t)(end - buf), station,
+                                           stats);
       buf += n;
-      maxlen -= n;
     }
-  if (maxlen >= 2)
+
+  if (buf < end)
     {
-      *buf++ = '}';
-      *buf++ = '\n';
-      maxlen -= 2;
+      if (end - buf >= 2)
+        {
+          *buf++ = '}';
+          *buf++ = '\n';
+        }
+      else
+        {
+          buf = end;
+        }
     }
 
-  *buf = 0;
-
-  assert (buf >= s);
-  return (size_t)(buf - s) - (maxlen == 0 ? 1UL : 0UL);
+  *buf = '\0';
+  return (size_t)(buf - s);
 }
 
 int
@@ -388,18 +408,33 @@ main (int argc, char **argv)
           return EXIT_FAILURE;
         }
 
-      if (read (pipefd[0], &output_buf, OUTPUT_BUFSIZE) == -1)
+      ssize_t n;
+      while ((n = read (pipefd[0], output_buf, sizeof (output_buf))) > 0)
+        {
+          if (fwrite (output_buf, 1, (size_t)n, stdout) != (size_t)n)
+            {
+              perror ("fwrite");
+              return EXIT_FAILURE;
+            }
+        }
+      if (n == -1)
         {
           perror ("read");
           return EXIT_FAILURE;
         }
-      printf ("%s", output_buf);
 
       if (close (pipefd[0]) != 0)
         {
           perror ("close");
           return EXIT_FAILURE;
         }
+
+      if (waitpid (pid, NULL, 0) == -1)
+        {
+          perror ("waitpid");
+          return EXIT_FAILURE;
+        }
+
       return EXIT_SUCCESS;
     }
 
@@ -425,6 +460,26 @@ main (int argc, char **argv)
       return EXIT_FAILURE;
     }
 
+  // Handle empty files early to prevent invalid mmap and batch logic crashes
+  if (sb.st_size == 0)
+    {
+#ifndef NO_CHILD_PROCESS
+      if (write (pipefd[1], "{}\n", 3) == -1)
+        {
+          perror ("write");
+          return EXIT_FAILURE;
+        }
+      if (close (pipefd[1]) != 0)
+        {
+          perror ("close");
+          return EXIT_FAILURE;
+        }
+#else
+      printf ("{}\n");
+#endif
+      return EXIT_SUCCESS;
+    }
+
   char *data = mmap (NULL, (size_t)sb.st_size, PROT_READ,
                      MAP_PRIVATE | MAP_NORESERVE, fd, 0);
   if (data == MAP_FAILED)
@@ -445,10 +500,15 @@ main (int argc, char **argv)
   int batches = omp_get_max_threads ();
   assert (batches > 0);
 
+  // If input size is smaller than batches, limit threads/batches to prevent
+  // division by zero or duplication
+  if ((size_t)sb.st_size < (size_t)batches)
+    batches = (int)sb.st_size;
+
   StatsTable **batch_res
       = arena_alloc (a, sizeof (StatsTable *) * (size_t)batches);
 
-#pragma omp parallel for
+#pragma omp parallel for num_threads(batches)
   for (size_t i = 0; i < (size_t)batches; i++)
     {
       size_t s = i * ((size_t)sb.st_size / (size_t)batches);
@@ -494,7 +554,9 @@ main (int argc, char **argv)
         }
     }
 
-  qsort (solution->stations, solution->size, sizeof (Stats *), stations__cmp);
+  qsort (solution->stations, solution->size, sizeof (Station *),
+         stations__cmp);
+
   size_t output_buf_len
       = statstable_to_str (output_buf, OUTPUT_BUFSIZE, solution);
 
@@ -511,7 +573,7 @@ main (int argc, char **argv)
       return EXIT_FAILURE;
     }
 #else
-  printf ("%s", output_buf);
+  printf ("%.*s", (int)output_buf_len, output_buf);
 #endif
 
   return EXIT_SUCCESS;
