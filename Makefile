@@ -1,6 +1,6 @@
 .PHONY: all clean
 
-CFLAGS += -O3 -g -Wall -Wextra -pedantic -std=c2x -m64 -march=native -mtune=native
+CFLAGS += -O3 -g -Wall -Wextra -pedantic -std=c23 -m64 -march=native -mtune=native
 CFLAGS += -D_DEFAULT_SOURCE
 CFLAGS += -DNDEBUG
 # CFLAGS += -DNO_CHILD_PROCESS
