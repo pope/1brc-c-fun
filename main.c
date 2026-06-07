@@ -163,8 +163,8 @@ statstable_alloc (Arena *a)
 }
 
 static inline Stats *
-statstable_get (StatsTable *table, char *key, unsigned short key_len,
-                unsigned int hash)
+statstable_get (StatsTable *restrict table, const char *restrict key,
+                unsigned short key_len, unsigned int hash)
 {
   assert (table != NULL);
   assert (table->size * 2 < TABLE_STATS_CAP - 1);
@@ -240,7 +240,7 @@ stations__cmp (const void *aa, const void *bb)
 }
 
 static inline StatsTable *
-process (char *data, size_t data_len)
+process (char *restrict data, size_t data_len)
 {
   assert (data);
   assert (data_len > 0);
@@ -307,8 +307,9 @@ process (char *data, size_t data_len)
 }
 
 static inline size_t
-statstable__stats_to_str (char *buf, size_t maxlen, const Station *station,
-                          const Stats *stats)
+statstable__stats_to_str (char *restrict buf, size_t maxlen,
+                          const Station *restrict station,
+                          const Stats *restrict stats)
 {
   double avg = ((double)stats->sum / (double)stats->count) / 10.0;
   double min = (double)stats->min / 10.0;
@@ -320,7 +321,8 @@ statstable__stats_to_str (char *buf, size_t maxlen, const Station *station,
 }
 
 static inline size_t
-statstable_to_str (char *buf, size_t maxlen, const StatsTable *table)
+statstable_to_str (char *restrict buf, size_t maxlen,
+                   const StatsTable *restrict table)
 {
   if (maxlen == 0)
     return 0;
@@ -497,8 +499,12 @@ main (int argc, char **argv)
 
   Arena *a = arena_new ();
 
+#if defined(_OPENMP)
   int batches = omp_get_max_threads ();
   assert (batches > 0);
+#else
+  int batches = 1;
+#endif
 
   // If input size is smaller than batches, limit threads/batches to prevent
   // division by zero or duplication
@@ -508,7 +514,8 @@ main (int argc, char **argv)
   StatsTable **batch_res
       = arena_alloc (a, sizeof (StatsTable *) * (size_t)batches);
 
-#pragma omp parallel for num_threads(batches)
+#pragma omp parallel for num_threads(batches) proc_bind(spread) default(none) \
+    shared(batches, sb, data, batch_res)
   for (size_t i = 0; i < (size_t)batches; i++)
     {
       size_t s = i * ((size_t)sb.st_size / (size_t)batches);
