@@ -385,68 +385,6 @@ main (int argc, char **argv)
 {
   char output_buf[OUTPUT_BUFSIZE];
 
-#ifndef NO_CHILD_PROCESS
-  // From https://github.com/dannyvankooten/1brc/blob/main/analyze.c.
-  // Use a child process to do all of the work. The child then sends the data
-  // over to the parent to be printed. While the parent is printing, the
-  // child is cleaning up it's memory.
-  //
-  // Trying this using threads with OpenMP - wsystemctl --user
-  // import-environment QT_QPA_PLATFORMTHEMEhere one thread prints data and the
-  // other cleans up - didn't help. Actually forking did.
-  int pipefd[2];
-  if (pipe (pipefd) != 0)
-    {
-      perror ("pipe");
-      return EXIT_FAILURE;
-    }
-
-  pid_t pid = fork ();
-  if (pid > 0)
-    {
-      if (close (pipefd[1]) != 0)
-        {
-          perror ("close");
-          return EXIT_FAILURE;
-        }
-
-      ssize_t n;
-      while ((n = read (pipefd[0], output_buf, sizeof (output_buf))) > 0)
-        {
-          if (fwrite (output_buf, 1, (size_t)n, stdout) != (size_t)n)
-            {
-              perror ("fwrite");
-              return EXIT_FAILURE;
-            }
-        }
-      if (n == -1)
-        {
-          perror ("read");
-          return EXIT_FAILURE;
-        }
-
-      if (close (pipefd[0]) != 0)
-        {
-          perror ("close");
-          return EXIT_FAILURE;
-        }
-
-      if (waitpid (pid, NULL, 0) == -1)
-        {
-          perror ("waitpid");
-          return EXIT_FAILURE;
-        }
-
-      return EXIT_SUCCESS;
-    }
-
-  if (close (pipefd[0]) != 0)
-    {
-      perror ("close");
-      return EXIT_FAILURE;
-    }
-#endif
-
   char *measurements_filename = argc == 2 ? argv[1] : "./measurements-1k.txt";
   int fd = open (measurements_filename, O_RDONLY);
   if (fd == -1)
@@ -465,20 +403,7 @@ main (int argc, char **argv)
   // Handle empty files early to prevent invalid mmap and batch logic crashes
   if (sb.st_size == 0)
     {
-#ifndef NO_CHILD_PROCESS
-      if (write (pipefd[1], "{}\n", 3) == -1)
-        {
-          perror ("write");
-          return EXIT_FAILURE;
-        }
-      if (close (pipefd[1]) != 0)
-        {
-          perror ("close");
-          return EXIT_FAILURE;
-        }
-#else
       printf ("{}\n");
-#endif
       return EXIT_SUCCESS;
     }
 
@@ -567,21 +492,7 @@ main (int argc, char **argv)
   size_t output_buf_len
       = statstable_to_str (output_buf, OUTPUT_BUFSIZE, solution);
 
-#ifndef NO_CHILD_PROCESS
-  if (write (pipefd[1], output_buf, output_buf_len) == -1)
-    {
-      perror ("write");
-      return EXIT_FAILURE;
-    }
-
-  if (close (pipefd[1]) != 0)
-    {
-      perror ("close");
-      return EXIT_FAILURE;
-    }
-#else
   printf ("%.*s", (int)output_buf_len, output_buf);
-#endif
 
   return EXIT_SUCCESS;
 }
